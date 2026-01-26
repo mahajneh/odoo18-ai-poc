@@ -1,0 +1,39 @@
+name: AI Issue -> Branch -> PR
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  generate:
+    if: github.event.label.name == 'ai'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Generate code from issue
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: python .github/ai/generate.py
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: ai/issue-${{ github.event.issue.number }}
+          title: "AI: Issue #${{ github.event.issue.number }} - ${{ github.event.issue.title }}"
+          commit-message: "AI: implement issue #${{ github.event.issue.number }}"
