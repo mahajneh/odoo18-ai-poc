@@ -1,79 +1,49 @@
-import os
-import json
-import requests
+import os, json, requests
 from pathlib import Path
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-ISSUE_TITLE = os.environ.get("ISSUE_TITLE", "")
-ISSUE_BODY = os.environ.get("ISSUE_BODY", "")
-ISSUE_NUMBER = os.environ.get("ISSUE_NUMBER", "0")
+print("=== AI GENERATOR v2 (DEBUG) ===")  # <-- signature
 
-if not OPENAI_API_KEY:
-    raise RuntimeError("OPENAI_API_KEY is missing. Add it in repo Settings -> Secrets -> Actions.")
+key = os.environ.get("OPENAI_API_KEY", "")
+if not key:
+    raise RuntimeError("OPENAI_API_KEY missing in GitHub Secrets.")
 
-# Ensure folders exist
+issue_title = os.environ.get("ISSUE_TITLE", "")
+issue_body = os.environ.get("ISSUE_BODY", "")
+issue_number = os.environ.get("ISSUE_NUMBER", "0")
+
 Path("addons").mkdir(exist_ok=True)
 Path("AI_SPECS").mkdir(exist_ok=True)
 
-# Force JSON output via schema
-schema = {
-    "name": "odoo_addon_files",
-    "schema": {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "files": {
-                "type": "object",
-                "additionalProperties": {"type": "string"},
-            }
-        },
-        "required": ["files"],
-    },
-    "strict": True,
-}
+prompt = f"""
+Return ONLY valid JSON in this format:
+{{
+  "files": {{
+    "addons/ai_issue_{issue_number}/__manifest__.py": "...",
+    "addons/ai_issue_{issue_number}/models/__init__.py": "...",
+    "addons/ai_issue_{issue_number}/models/models.py": "..."
+  }}
+}}
+No markdown. No explanations.
 
-system_prompt = f"""
-You are a senior Odoo 18 developer.
-
-Generate a minimal addon skeleton for the issue.
-
-Rules:
-- Output JSON only using the required schema.
-- Write ONLY under:
-  - addons/ai_issue_{ISSUE_NUMBER}/...
-  - AI_SPECS/issue-{ISSUE_NUMBER}.md
-- Create at least:
-  - addons/ai_issue_{ISSUE_NUMBER}/__manifest__.py
-  - addons/ai_issue_{ISSUE_NUMBER}/models/__init__.py
-  - addons/ai_issue_{ISSUE_NUMBER}/models/models.py
+Issue title: {issue_title}
+Issue body: {issue_body}
 """
 
-user_prompt = f"TITLE: {ISSUE_TITLE}\n\nBODY:\n{ISSUE_BODY}"
-
-resp = requests.post(
+r = requests.post(
     "https://api.openai.com/v1/responses",
-    headers={
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json",
-    },
-    json={
-        "model": "gpt-4o-mini",
-        "input": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "text": {"format": {"type": "json_schema", "json_schema": schema}},
-    },
+    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    json={"model": "gpt-4o-mini", "input": prompt},
     timeout=120,
 )
 
-# If OpenAI returns an error, show it in logs clearly
-if resp.status_code >= 400:
-    raise RuntimeError(f"OpenAI API error {resp.status_code}: {resp.text}")
+print("OpenAI status:", r.status_code)
+print("OpenAI raw response:", r.text[:2000])  # print first 2k chars
 
-data = resp.json()
+if r.status_code >= 400:
+    raise RuntimeError(f"OpenAI API error {r.status_code}")
 
-# Extract output text
+data = r.json()
+
 text = ""
 for item in data.get("output", []):
     if item.get("type") == "message":
@@ -81,27 +51,16 @@ for item in data.get("output", []):
             if c.get("type") == "output_text":
                 text += c.get("text", "")
 
-if not text.strip():
-    raise RuntimeError("Model returned empty output_text. Check OpenAI model access and API key.")
+print("Extracted output_text (first 2000 chars):", text[:2000])
 
 payload = json.loads(text)
 files = payload.get("files", {})
 
-if not isinstance(files, dict) or not files:
-    raise RuntimeError(f"Invalid 'files' returned: {payload}")
-
-# Write files (guard paths)
-allowed_prefixes = ("addons/", "AI_SPECS/")
 for path, content in files.items():
-    if not path.startswith(allowed_prefixes):
-        raise RuntimeError(f"Blocked write outside allowed folders: {path}")
-
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
 
-# Always write spec (even if model forgot)
-Path(f"AI_SPECS/issue-{ISSUE_NUMBER}.md").write_text(
-    f"# Issue #{ISSUE_NUMBER}\n\n## {ISSUE_TITLE}\n\n{ISSUE_BODY}\n",
-    encoding="utf-8",
+Path(f"AI_SPECS/issue-{issue_number}.md").write_text(
+    f"# Issue #{issue_number}\n\n## {issue_title}\n\n{issue_body}\n", encoding="utf-8"
 )
