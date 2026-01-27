@@ -3,14 +3,19 @@ import json
 import requests
 from pathlib import Path
 
-OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 ISSUE_TITLE = os.environ.get("ISSUE_TITLE", "")
 ISSUE_BODY = os.environ.get("ISSUE_BODY", "")
 ISSUE_NUMBER = os.environ.get("ISSUE_NUMBER", "0")
 
-# Only allow writing here
-ALLOWED_PREFIXES = ("addons/", "AI_SPECS/")
+if not OPENAI_API_KEY:
+    raise RuntimeError("OPENAI_API_KEY is missing. Add it in repo Settings -> Secrets -> Actions.")
 
+# Ensure folders exist
+Path("addons").mkdir(exist_ok=True)
+Path("AI_SPECS").mkdir(exist_ok=True)
+
+# Force JSON output via schema
 schema = {
     "name": "odoo_addon_files",
     "schema": {
@@ -27,21 +32,23 @@ schema = {
     "strict": True,
 }
 
-prompt = f"""
+system_prompt = f"""
 You are a senior Odoo 18 developer.
 
-Create a minimal Odoo addon based on this issue.
+Generate a minimal addon skeleton for the issue.
 
 Rules:
-- Create addon in: addons/ai_issue_{ISSUE_NUMBER}/
-- Include at least:
-  - __manifest__.py
-  - models/__init__.py
-  - models/models.py
-- Keep files minimal but valid.
+- Output JSON only using the required schema.
+- Write ONLY under:
+  - addons/ai_issue_{ISSUE_NUMBER}/...
+  - AI_SPECS/issue-{ISSUE_NUMBER}.md
+- Create at least:
+  - addons/ai_issue_{ISSUE_NUMBER}/__manifest__.py
+  - addons/ai_issue_{ISSUE_NUMBER}/models/__init__.py
+  - addons/ai_issue_{ISSUE_NUMBER}/models/models.py
 """
 
-issue = f"TITLE: {ISSUE_TITLE}\n\nBODY:\n{ISSUE_BODY}"
+user_prompt = f"TITLE: {ISSUE_TITLE}\n\nBODY:\n{ISSUE_BODY}"
 
 resp = requests.post(
     "https://api.openai.com/v1/responses",
@@ -50,18 +57,17 @@ resp = requests.post(
         "Content-Type": "application/json",
     },
     json={
-        "model": "gpt-4o-mini",  # safer default availability
+        "model": "gpt-4o-mini",
         "input": [
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": issue},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
         ],
-        # Force JSON output
         "text": {"format": {"type": "json_schema", "json_schema": schema}},
     },
     timeout=120,
 )
 
-# If OpenAI returns an error, show it in logs
+# If OpenAI returns an error, show it in logs clearly
 if resp.status_code >= 400:
     raise RuntimeError(f"OpenAI API error {resp.status_code}: {resp.text}")
 
@@ -76,26 +82,25 @@ for item in data.get("output", []):
                 text += c.get("text", "")
 
 if not text.strip():
-    raise RuntimeError("Model returned empty output_text. Check model access / API key / response payload.")
+    raise RuntimeError("Model returned empty output_text. Check OpenAI model access and API key.")
 
-# Parse strictly
 payload = json.loads(text)
 files = payload.get("files", {})
 
 if not isinstance(files, dict) or not files:
-    raise RuntimeError(f"Invalid 'files' object returned: {payload}")
+    raise RuntimeError(f"Invalid 'files' returned: {payload}")
 
-# Write files (with path guard)
+# Write files (guard paths)
+allowed_prefixes = ("addons/", "AI_SPECS/")
 for path, content in files.items():
-    if not any(path.startswith(p) for p in ALLOWED_PREFIXES):
-        raise RuntimeError(f"Blocked path outside allowed prefixes: {path}")
+    if not path.startswith(allowed_prefixes):
+        raise RuntimeError(f"Blocked write outside allowed folders: {path}")
 
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
 
-# Write a simple spec trace
-Path("AI_SPECS").mkdir(exist_ok=True)
+# Always write spec (even if model forgot)
 Path(f"AI_SPECS/issue-{ISSUE_NUMBER}.md").write_text(
     f"# Issue #{ISSUE_NUMBER}\n\n## {ISSUE_TITLE}\n\n{ISSUE_BODY}\n",
     encoding="utf-8",
