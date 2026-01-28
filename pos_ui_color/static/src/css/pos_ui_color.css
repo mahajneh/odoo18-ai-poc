@@ -1,0 +1,36 @@
+:root {
+  --pos-primary-color: #3276b1;
+}
+
+/* Ensure top bar, major buttons and confirm buttons use the chosen color */
+.pos-ui-colorized .button, .pos-ui-colorized .button.confirm, .pos-ui-colorized .header, .pos-ui-colorized .pos-topbar {
+  background-color: var(--pos-primary-color) !important;
+  border-color: var(--pos-primary-color) !important;
+  color: white !important;
+}
+
+/* Small button for the color-picker in the top bar */
+.button-color {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  color: white;
+  background-color: var(--pos-primary-color);
+  margin-left: 8px;
+  border: 1px solid rgba(0,0,0,0.1);
+}
+
+/* Popup styling */
+.popup-color-picker .popup-body {
+  padding: 12px;
+}
+.popup-color-picker .pos-color-input {
+  width: 100%;
+  height: 40px;
+  border: none;
+  background: none;
+}

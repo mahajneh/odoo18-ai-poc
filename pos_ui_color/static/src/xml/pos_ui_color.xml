@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<templates id="template" xml:space="preserve">
+  <t t-name="ColorPickerPopup">
+    <div class="popup popup-color-picker">
+      <div class="popup-head">POS Theme Color</div>
+      <div class="popup-body">
+        <input type="color" class="pos-color-input"/>
+      </div>
+      <div class="popup-footer">
+        <button class="button cancel">Cancel</button>
+        <button class="button confirm">Apply</button>
+      </div>
+    </div>
+  </t>
+
+  <t t-name="ColorButton">
+    <div class="button button-color" title="Change POS color">
+      <i class="fa fa-paint-brush" aria-hidden="true"></i>
+    </div>
+  </t>
+</templates>

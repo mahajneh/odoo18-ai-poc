@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Add pos_theme_color to company form -->
+    <record id="view_company_form_pos_theme" model="ir.ui.view">
+        <field name="name">res.company.form.pos.theme</field>
+        <field name="model">res.company</field>
+        <field name="inherit_id">base.view_company_form</field>
+        <field name="arch" type="xml">
+            <xpath expr="//sheet/notebook/page/field[@name='company_registry']/.." position="inside">
+                <group>
+                    <field name="pos_theme_color" widget="color"/>
+                </group>
+            </xpath>
+        </field>
+    </record>
+</odoo>
