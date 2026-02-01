@@ -53,16 +53,19 @@ module_root = f"addons/{module_name}"
 #   "files": { "path": "file-content", ... }
 # }
 schema = {
-    "type": "object",
-    "properties": {
-        "files": {
-            "type": "object",
-            "additionalProperties": {"type": "string"},
-        }
-    },
-    "required": ["files"],
-    "additionalProperties": False,
+  "type": "object",
+  "properties": {
+    "files": {
+      "type": "object",
+      "properties": {},  # required by OpenAI strict schema
+      "additionalProperties": {"type": "string"},
+      "required": []     # required by OpenAI strict schema
+    }
+  },
+  "required": ["files"],
+  "additionalProperties": False
 }
+
 
 prompt = f"""
 You are generating an Odoo addon inside an existing repo.
