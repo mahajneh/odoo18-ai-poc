@@ -1,132 +1,91 @@
 import base64
 import json
 import os
-import re
-import subprocess
 from pathlib import Path
 
 import requests
 
 
-# -----------------------------
-# Helpers
-# -----------------------------
 def die(msg: str) -> None:
     raise RuntimeError(msg)
 
 
-def run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, check=check, text=True, capture_output=True)
-
-
 def extract_output_text(resp_json: dict) -> str:
     """
-    Extracts concatenated `output_text` segments from the Responses API payload.
+    Extract concatenated output_text segments from the Responses API payload.
     """
-    text = ""
+    parts = []
     for item in resp_json.get("output", []):
         if item.get("type") == "message":
             for c in item.get("content", []):
                 if c.get("type") == "output_text":
-                    text += c.get("text", "")
-    return text
+                    parts.append(c.get("text", ""))
+    return "".join(parts)
 
 
-def extract_first_json_object(s: str) -> str:
-    """
-    Fallback extractor: grabs the first JSON object from a blob of text.
-    Helps if the model accidentally prints extra text.
-    """
-    s = s.strip()
-    if s.startswith("{") and s.endswith("}"):
-        return s
-
-    # naive brace matching
-    start = s.find("{")
-    if start == -1:
-        die("No JSON object found in output.")
-    depth = 0
-    for i in range(start, len(s)):
-        if s[i] == "{":
-            depth += 1
-        elif s[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return s[start : i + 1]
-
-    die("Unbalanced JSON braces in output.")
-
-
-def ensure_git_identity() -> None:
-    # Safe defaults for GitHub Actions
-    run(["git", "config", "user.name", "github-actions[bot]"], check=False)
-    run(["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], check=False)
-
-
-def git_has_changes() -> bool:
-    r = run(["git", "status", "--porcelain"], check=True)
-    return bool(r.stdout.strip())
-
-
-# -----------------------------
-# Main
-# -----------------------------
-print("=== AI GENERATOR v4 (BASE64 FILES + AUTO COMMIT) ===")
+print("=== AI GENERATOR v4.1 (STRICT JSON + B64 + HIGH TOKENS) ===")
 
 key = os.environ.get("OPENAI_API_KEY", "").strip()
 if not key:
     die("OPENAI_API_KEY missing in GitHub Secrets.")
 
-issue_title = os.environ.get("ISSUE_TITLE", "").strip()
+issue_title = os.environ.get("ISSUE_TITLE", "").strip() or "AI Issue"
 issue_body = os.environ.get("ISSUE_BODY", "").strip()
 issue_number = os.environ.get("ISSUE_NUMBER", "0").strip()
 
-if not issue_title:
-    issue_title = f"Issue {issue_number}"
-
-# IMPORTANT: Your repo layout is Odoo inside /odoo and addons live under /odoo/addons
-addons_root = Path("odoo/addons")
-addons_root.mkdir(parents=True, exist_ok=True)
+# Repo layout: you are writing under odoo/addons/...
+module_name = f"ai_issue_{issue_number}"
+module_root = f"odoo/addons/{module_name}"
 
 Path("AI_SPECS").mkdir(parents=True, exist_ok=True)
 
-module_name = f"ai_issue_{issue_number}"
-module_root = addons_root / module_name
+# Strict JSON schema. IMPORTANT: In strict mode, OpenAI requires:
+# - required must be present where used
+# - properties must be present where used
+schema = {
+    "type": "object",
+    "properties": {
+        "files_b64": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {"type": "string"},
+            "required": [],
+        }
+    },
+    "required": ["files_b64"],
+    "additionalProperties": False,
+}
 
-# Prompt: force JSON + base64 content to avoid JSONDecodeError
 prompt = f"""
-You are generating an Odoo 18 addon inside an existing git repo.
+You are generating an Odoo 18 addon inside an existing repository.
 
-Return ONLY valid JSON (no markdown, no explanations) in this exact shape:
-
+Return ONLY valid JSON that matches the enforced schema:
 {{
   "files_b64": {{
-    "odoo/addons/{module_name}/__manifest__.py": "<BASE64_OF_FILE_CONTENT>",
-    "odoo/addons/{module_name}/__init__.py": "<BASE64>",
-    "odoo/addons/{module_name}/models/__init__.py": "<BASE64>",
-    "odoo/addons/{module_name}/models/models.py": "<BASE64>"
+    "path": "base64(file_content_utf8)",
+    ...
   }}
 }}
 
 Rules:
-- Every path MUST start with "odoo/addons/{module_name}/"
-- Provide at least the 4 required files listed above.
-- File contents must be UTF-8 text, then BASE64 encoded (standard base64, no newlines).
-- "__manifest__.py" must be valid Python dict literal code.
-- Odoo 18 manifest rules:
-  - version must be "18.0.1.0.1"
-  - author must be "mahajneh"
-  - website must be "https://mahajneh.com"
-- Implement a model that stores loyalty points per customer:
-  - partner_id = Many2one('res.partner', required=True)
-  - points = Integer(default=0)
+- ALL file paths MUST start with "{module_root}/"
+- Return ONLY these exact paths (no extra files):
+  1) "{module_root}/__manifest__.py"
+  2) "{module_root}/__init__.py"
+  3) "{module_root}/models/__init__.py"
+  4) "{module_root}/models/models.py"
+- Keep code minimal and correct for Odoo 18.
+- __manifest__.py must be a Python dict literal (not JSON).
+- Must implement a model:
+  - partner_id = fields.Many2one('res.partner', required=True)
+  - points = fields.Integer(default=0)
+- No markdown. No explanations. JSON only.
 
 Issue title: {issue_title}
 Issue body:
 {issue_body}
 """.strip()
 
-# Call OpenAI Responses API
 r = requests.post(
     "https://api.openai.com/v1/responses",
     headers={
@@ -134,11 +93,18 @@ r = requests.post(
         "Content-Type": "application/json",
     },
     json={
-        "model": "gpt-4o-mini",
+        "model": "gpt-4o-mini-2024-07-18",
         "input": prompt,
-        "temperature": 0,
-        "max_output_tokens": 2000,
-        "text": {"format": {"type": "text"}},
+        # IMPORTANT: raise max_output_tokens so response isn't truncated
+        "max_output_tokens": 8000,
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "repo_patch",
+                "schema": schema,
+                "strict": True,
+            }
+        },
     },
     timeout=180,
 )
@@ -152,65 +118,49 @@ if r.status_code >= 400:
 
 data = r.json()
 out_text = extract_output_text(data)
-print("Extracted output_text (first 1200 chars):", (out_text or "")[:1200])
+print("Extracted output_text (first 2000 chars):", (out_text or "")[:2000])
+
+# Handle incomplete responses explicitly
+if data.get("status") != "completed":
+    incomplete = data.get("incomplete_details") or {}
+    die(f"OpenAI response not completed. status={data.get('status')}, details={incomplete}")
 
 if not out_text.strip():
-    die("OpenAI returned empty output_text. Check raw response above.")
+    die("OpenAI returned empty output_text.")
 
-# Parse JSON (robust)
-json_blob = extract_first_json_object(out_text)
 try:
-    payload = json.loads(json_blob)
+    payload = json.loads(out_text)
 except json.JSONDecodeError as e:
-    die(f"JSON parse failed: {e}\nFirst 1200 chars:\n{json_blob[:1200]}")
+    tail = out_text[-500:] if out_text else ""
+    die(f"JSON parse failed: {e}\n--- output tail ---\n{tail}")
 
-files_b64 = payload.get("files_b64")
+files_b64 = payload.get("files_b64", {})
 if not isinstance(files_b64, dict) or not files_b64:
     die(f"No files_b64 returned. Payload keys: {list(payload.keys())}")
 
-# Write files safely
+# Write module files
 written = 0
 for path_str, b64 in files_b64.items():
     if not isinstance(path_str, str) or not isinstance(b64, str):
         die("Invalid files_b64 mapping (paths and contents must be strings).")
 
-    if not path_str.startswith(f"odoo/addons/{module_name}/"):
+    if not path_str.startswith(f"{module_root}/"):
         die(f"Refusing to write outside module root. Got path: {path_str}")
 
     try:
-        content = base64.b64decode(b64.encode("utf-8"), validate=True).decode("utf-8")
+        content = base64.b64decode(b64).decode("utf-8")
     except Exception as e:
-        die(f"Failed to base64-decode content for {path_str}: {e}")
+        die(f"Base64 decode failed for {path_str}: {e}")
 
     p = Path(path_str)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
     written += 1
 
-# Write spec file for traceability
-spec_path = Path(f"AI_SPECS/issue-{issue_number}.md")
-spec_path.write_text(
+Path(f"AI_SPECS/issue-{issue_number}.md").write_text(
     f"# Issue #{issue_number}\n\n## {issue_title}\n\n{issue_body}\n",
     encoding="utf-8",
 )
 
-print(f"✅ Generated {written} files under odoo/addons/{module_name}/")
-print(f"✅ Wrote {spec_path}")
-
-# -----------------------------
-# Git add + commit (CRITICAL)
-# -----------------------------
-ensure_git_identity()
-
-# Stage only what we touched
-run(["git", "add", str(module_root), str(spec_path)])
-
-if not git_has_changes():
-    # This prevents "no PR" silent behavior
-    die("No git changes detected after generation. Nothing to commit.")
-
-commit_msg = f"AI: implement issue #{issue_number}"
-run(["git", "commit", "-m", commit_msg])
-
-print("✅ Committed changes:", commit_msg)
+print(f"✅ Generated {written} files under {module_root}/")
 print("✅ Done.")
