@@ -1,0 +1,1 @@
+from odoo import models, fields\n\nclass LoyaltyPoints(models.Model):\n    _name = 'loyalty.points'\n    _description = 'Loyalty Points'\n\n    partner_id = fields.Many2one('res.partner', string='Customer', required=True)\n    points = fields.Integer(string='Points', default=0)\n

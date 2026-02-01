@@ -1,0 +1,1 @@
+{\n    'name': 'AI Issue 5',\n    'version': '1.0',\n    'category': 'Point of Sale',\n    'summary': 'Adds loyalty points functionality.',\n    'depends': ['point_of_sale', 'sale_management', 'purchase', 'account'],\n    'data': [],\n    'installable': True,\n    'application': False,\n}
