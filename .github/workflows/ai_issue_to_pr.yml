@@ -14,14 +14,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install --upgrade pip requests
 
       - name: Generate code from issue
         env:
@@ -32,8 +34,12 @@ jobs:
         run: python .github/ai/generate.py
 
       - name: Create Pull Request
-        uses: mahajneh/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v6
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           branch: ai/issue-${{ github.event.issue.number }}
           title: "AI: Issue #${{ github.event.issue.number }} - ${{ github.event.issue.title }}"
           commit-message: "AI: implement issue #${{ github.event.issue.number }}"
+          base: main
+          draft: false
+          delete-branch: false
